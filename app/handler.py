@@ -231,11 +231,28 @@ def generate_wav(language, text, reference_speaker='resources/1.wav', speed=1.0)
         # Upload audio to S3 bucket
         object_name = os.path.basename(output_audio_path)
 
-        uploaded_url, error = upload_to_s3(output_audio_path, bucket_name, object_name)
-        if error:
-            return None, error
-
-        return uploaded_url, None
+        # 檢查是否有 S3 憑證，如果沒有則跳過上傳
+        if os.getenv('BUCKET_ENDPOINT_URL') and os.getenv('BUCKET_ACCESS_KEY_ID') and os.getenv('BUCKET_SECRET_ACCESS_KEY'):
+            uploaded_url, error = upload_to_s3(output_audio_path, bucket_name, object_name)
+            if error:
+                return None, error
+            return uploaded_url, None
+        else:
+            # 如果沒有 S3 憑證，將檔案複製到 www 目錄供前端訪問
+            www_dir = '/app/www'
+            os.makedirs(www_dir, exist_ok=True)
+            
+            # 生成唯一的檔案名
+            import uuid
+            unique_filename = f"speech_{uuid.uuid4().hex[:8]}.wav"
+            www_file_path = os.path.join(www_dir, unique_filename)
+            
+            # 複製檔案
+            import shutil
+            shutil.copy2(output_audio_path, www_file_path)
+            
+            print(f'[OpenVoice]: No S3 credentials found, copied file to: {www_file_path}')
+            return f"/www/{unique_filename}", None
 
     except Exception as e:
         return None, e
@@ -307,14 +324,14 @@ def handler(job):
             return {'error': f'Downloaded file too small: {file_size} bytes'}
         
         print(f'[OpenVoice]: Generating audio with language={language}, text="{text[:50]}...", speed={speed}')
-        output_audio_url, error = generate_wav(language=language, text=text, reference_speaker=reference_speaker, speed=speed)
+        output_audio_path, error = generate_wav(language=language, text=text, reference_speaker=reference_speaker, speed=speed)
         if error:
             print(f'ERROR in generate_wav: {error}')
             return {'error': f'Failed to generate audio: {error}'}
         else:
-            print(f'[OpenVoice]: Successfully generated audio: {output_audio_url}')
+            print(f'[OpenVoice]: Successfully generated audio: {output_audio_path}')
             return {
-                'output_audio_url': output_audio_url
+                'output_audio_path': output_audio_path
             }
     except Exception as e:
         print(f'[OpenVoice]: Unexpected error: {e}')
