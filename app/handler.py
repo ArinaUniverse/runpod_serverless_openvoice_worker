@@ -238,21 +238,18 @@ def generate_wav(language, text, reference_speaker='resources/1.wav', speed=1.0)
                 return None, error
             return uploaded_url, None
         else:
-            # 如果沒有 S3 憑證，將檔案複製到 www 目錄供前端訪問
-            www_dir = '/app/www'
-            os.makedirs(www_dir, exist_ok=True)
+            # 如果沒有 S3 憑證，將檔案轉換為 base64 編碼
+            import base64
             
-            # 生成唯一的檔案名
-            import uuid
-            unique_filename = f"speech_{uuid.uuid4().hex[:8]}.wav"
-            www_file_path = os.path.join(www_dir, unique_filename)
-            
-            # 複製檔案
-            import shutil
-            shutil.copy2(output_audio_path, www_file_path)
-            
-            print(f'[OpenVoice]: No S3 credentials found, copied file to: {www_file_path}')
-            return f"/www/{unique_filename}", None
+            try:
+                with open(output_audio_path, 'rb') as audio_file:
+                    audio_data = audio_file.read()
+                    audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+                
+                print(f'[OpenVoice]: No S3 credentials found, returning base64 encoded audio (size: {len(audio_data)} bytes)')
+                return f"data:audio/wav;base64,{audio_base64}", None
+            except Exception as e:
+                return None, f'Failed to encode audio file: {str(e)}'
 
     except Exception as e:
         return None, e
