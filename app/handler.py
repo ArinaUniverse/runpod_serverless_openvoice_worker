@@ -2,11 +2,11 @@
 The MIT License (MIT)
 Copyright © 2024 Dominic Powers
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 '''
 import runpod
 import urllib.request
@@ -163,15 +163,22 @@ def sync_checkpoints(url, target_dir, zip_filename, required_dirs):
 
 ''' Call openview model to convert text to speech
     ENV variable BUCKET_NAME can set your bucket name, which defaults to OpenVoive'''
-def generate_wav(language, text, reference_speaker='resources/example_reference.mp3', speed=1.0):
+def generate_wav(language, text, reference_speaker='resources/1.wav', speed=1.0):
 
     try:
         # Prepare defaults
         bucket_name = os.getenv('BUCKET_NAME', 'OpenVoice')
         ckpt_converter = 'checkpoints_v2/converter'
 
+        # Ensure all necessary directories exist
+        os.makedirs('checkpoints_v2', exist_ok=True)
+        os.makedirs('checkpoints_v2/base_speakers', exist_ok=True)
+        os.makedirs('checkpoints_v2/base_speakers/ses', exist_ok=True)
+        os.makedirs('checkpoints_v2/converter', exist_ok=True)
         output_dir = 'outputs_v2'
         os.makedirs('outputs_v2', exist_ok=True)
+        os.makedirs('tmp', exist_ok=True)
+        os.makedirs('processed', exist_ok=True)
 
         src_path = f'{output_dir}/tmp.wav'
 
@@ -182,6 +189,19 @@ def generate_wav(language, text, reference_speaker='resources/example_reference.
         # Obtain Tone Color Embedding
         tone_color_converter = ToneColorConverter(f'{ckpt_converter}/config.json', device=device)
         tone_color_converter.load_ckpt(f'{ckpt_converter}/checkpoint.pth')
+
+        print(f'[OpenVoice]: Checking if reference speaker file exists: {reference_speaker}')
+        if not os.path.exists(reference_speaker):
+            return None, f'Reference speaker file not found: {reference_speaker}'
+
+        # 檢查必要的 checkpoints 檔案是否存在
+        required_files = [
+            f'{ckpt_converter}/config.json',
+            f'{ckpt_converter}/checkpoint.pth'
+        ]
+        for file_path in required_files:
+            if not os.path.exists(file_path):
+                return None, f'Required checkpoint file not found: {file_path}'
 
         target_se, audio_name = se_extractor.get_se(reference_speaker, tone_color_converter, vad=False)
 
@@ -222,60 +242,83 @@ def generate_wav(language, text, reference_speaker='resources/example_reference.
 
 ''' RunPod Handler function that will be used to process jobs. '''
 def handler(job):
-    job_input = job['input']
+    try:
+        job_input = job['input']
 
-    # Print startup header
-    print(f'[OpenVoice]: Processing job request')
+        # Print startup header
+        print(f'[OpenVoice]: Processing job request')
 
-    # text option - Text to convert to speech
-    """
-    OPTION: text 
-    DEFAULT VALUE: None (REQUIRED) 
-    AVAILABLE OPTIONS: Any text you want to convert to speech
-    *Override default value using ENV variable DEFAULT_TEXT 
-    """
-    text = job_input.get('text', os.getenv('DEFAULT_TEXT', None))
+        # Ensure tmp directory exists
+        os.makedirs('tmp', exist_ok=True)
 
-    # language option - Language text is written in
-    """
-    OPTION: language 
-    DEFAULT VALUE: EN 
-    AVAILABLE OPTIONS: One of ['EN', 'EN-AU', 'EN-BR', 'EN-INDIA', 'EN-US', 'EN-DEFAULT', ES', 'FR', 'ZH', 'JP', 'KR']
-    *Override default value using ENV variable DEFAULT_LANGUAGE 
-    """
-    language = job_input.get('language', os.getenv('DEFAULT_LANGUAGE', 'EN'))
+        # text option - Text to convert to speech
+        """
+        OPTION: text 
+        DEFAULT VALUE: None (REQUIRED) 
+        AVAILABLE OPTIONS: Any text you want to convert to speech
+        *Override default value using ENV variable DEFAULT_TEXT 
+        """
+        text = job_input.get('text', os.getenv('DEFAULT_TEXT', None))
+        if not text:
+            return {'error': 'Text is required'}
 
-    # voice_url - URL to an mp3 file with the desired speaker's voice recorded
-    """
-    OPTION: voice_url 
-    DEFAULT VALUE: None (REQUIRED) 
-    AVAILABLE OPTIONS: Any valid URL to a short mp3 file with a clear recording of the desired voice
-    *Override default value using ENV variable DEFAULT_VOICE_URL 
-    """
-    voice_url = job_input.get('voice_url', os.getenv('DEFAULT_VOICE_URL', None))
+        # language option - Language text is written in
+        """
+        OPTION: language 
+        DEFAULT VALUE: EN 
+        AVAILABLE OPTIONS: One of ['EN', 'EN-AU', 'EN-BR', 'EN-INDIA', 'EN-US', 'EN-DEFAULT', ES', 'FR', 'ZH', 'JP', 'KR']
+        *Override default value using ENV variable DEFAULT_LANGUAGE 
+        """
+        language = job_input.get('language', os.getenv('DEFAULT_LANGUAGE', 'EN'))
 
-    # speed option - Speed at which to speak text
-    """
-    OPTION: speed 
-    DEFAULT VALUE: 1.0 
-    AVAILABLE OPTIONS: Look up the range and place here
-    *Override default value using ENV variable DEFAULT_SPEED 
-    """
-    speed = job_input.get('speed', os.getenv('DEFAULT_SPEED', 1.0))
+        # voice_url - URL to an mp3 file with the desired speaker's voice recorded
+        """
+        OPTION: voice_url 
+        DEFAULT VALUE: None (REQUIRED) 
+        AVAILABLE OPTIONS: Any valid URL to a short mp3 file with a clear recording of the desired voice
+        *Override default value using ENV variable DEFAULT_VOICE_URL 
+        """
+        voice_url = job_input.get('voice_url', os.getenv('DEFAULT_VOICE_URL', None))
+        if not voice_url:
+            return {'error': 'Voice URL is required'}
 
-    reference_speaker, error = download_file(voice_url, 'tmp/audio.mp3')
-    if error:
-        print(f'ERROR in download_file: {error}')
-        sys.exit(1)
-    else:
+        # speed option - Speed at which to speak text
+        """
+        OPTION: speed 
+        DEFAULT VALUE: 1.0 
+        AVAILABLE OPTIONS: Look up the range and place here
+        *Override default value using ENV variable DEFAULT_SPEED 
+        """
+        speed = job_input.get('speed', os.getenv('DEFAULT_SPEED', 1.0))
+
+        print(f'[OpenVoice]: Downloading voice file from {voice_url}')
+        reference_speaker, error = download_file(voice_url, 'tmp/audio.wav')
+        if error:
+            print(f'ERROR in download_file: {error}')
+            return {'error': f'Failed to download voice file: {error}'}
+        
+        # 檢查下載的檔案是否存在且大小合理
+        if not os.path.exists(reference_speaker):
+            return {'error': 'Downloaded file does not exist'}
+        
+        file_size = os.path.getsize(reference_speaker)
+        print(f'[OpenVoice]: Downloaded file size: {file_size} bytes')
+        if file_size < 1000:  # 小於 1KB 的檔案可能有問題
+            return {'error': f'Downloaded file too small: {file_size} bytes'}
+        
+        print(f'[OpenVoice]: Generating audio with language={language}, text="{text[:50]}...", speed={speed}')
         output_audio_url, error = generate_wav(language=language, text=text, reference_speaker=reference_speaker, speed=speed)
         if error:
             print(f'ERROR in generate_wav: {error}')
-            sys.exit(1)
+            return {'error': f'Failed to generate audio: {error}'}
         else:
+            print(f'[OpenVoice]: Successfully generated audio: {output_audio_url}')
             return {
                 'output_audio_url': output_audio_url
             }
+    except Exception as e:
+        print(f'[OpenVoice]: Unexpected error: {e}')
+        return {'error': f'Unexpected error: {str(e)}'}
 
 if __name__ == '__main__':
 
