@@ -305,20 +305,30 @@ def handler(job):
         """
         speed = job_input.get('speed', os.getenv('DEFAULT_SPEED', 1.0))
 
-        print(f'[OpenVoice]: Downloading voice file from {voice_url}')
-        reference_speaker, error = download_file(voice_url, 'tmp/audio.wav')
-        if error:
-            print(f'ERROR in download_file: {error}')
-            return {'error': f'Failed to download voice file: {error}'}
+        print(f'[OpenVoice]: Processing voice file from {voice_url}')
         
-        # 檢查下載的檔案是否存在且大小合理
+        # 檢查是否為本地檔案路徑
+        if voice_url.startswith('http://') or voice_url.startswith('https://'):
+            # 如果是 URL，下載檔案
+            reference_speaker, error = download_file(voice_url, 'tmp/audio.wav')
+            if error:
+                print(f'ERROR in download_file: {error}')
+                return {'error': f'Failed to download voice file: {error}'}
+        else:
+            # 如果是本地檔案路徑，直接使用
+            reference_speaker = voice_url
+            if not os.path.exists(reference_speaker):
+                print(f'ERROR: Local file not found: {reference_speaker}')
+                return {'error': f'Local voice file not found: {reference_speaker}'}
+        
+        # 檢查檔案是否存在且大小合理
         if not os.path.exists(reference_speaker):
-            return {'error': 'Downloaded file does not exist'}
+            return {'error': 'Voice file does not exist'}
         
         file_size = os.path.getsize(reference_speaker)
-        print(f'[OpenVoice]: Downloaded file size: {file_size} bytes')
+        print(f'[OpenVoice]: Voice file size: {file_size} bytes')
         if file_size < 1000:  # 小於 1KB 的檔案可能有問題
-            return {'error': f'Downloaded file too small: {file_size} bytes'}
+            return {'error': f'Voice file too small: {file_size} bytes'}
         
         print(f'[OpenVoice]: Generating audio with language={language}, text="{text[:50]}...", speed={speed}')
         output_audio_path, error = generate_wav(language=language, text=text, reference_speaker=reference_speaker, speed=speed)
